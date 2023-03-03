@@ -33,6 +33,8 @@ struct caps_word_continue_item {
 struct behavior_caps_word_config {
     zmk_mod_flags_t mods;
     uint8_t index;
+    int32_t mods_trigger_aux_keycodes_len;
+    int32_t (*mods_trigger_aux_keycodes)[];
     uint8_t continuations_count;
     struct caps_word_continue_item continuations[];
 };
@@ -114,9 +116,22 @@ static bool caps_word_is_numeric(uint8_t usage_id) {
             usage_id <= HID_USAGE_KEY_KEYBOARD_0_AND_RIGHT_PARENTHESIS);
 }
 
+static bool caps_word_is_aux_keycode(const struct behavior_caps_word_config *config,
+                                     struct zmk_keycode_state_changed *ev) {
+    if (config->mods_trigger_aux_keycodes_len == 0) return true;
+
+    for (int i = 0; i < config->mods_trigger_aux_keycodes_len; i++) {
+        if ((*config->mods_trigger_aux_keycodes)[i] == ZMK_HID_USAGE(ev->usage_page, ev->keycode)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static void caps_word_enhance_usage(const struct behavior_caps_word_config *config,
                                     struct zmk_keycode_state_changed *ev) {
-    if (ev->usage_page != HID_USAGE_KEY || !caps_word_is_alpha(ev->keycode)) {
+    if (ev->usage_page != HID_USAGE_KEY || (!caps_word_is_alpha(ev->keycode) && !caps_word_is_aux_keycode(config, ev))) {
         return;
     }
 
@@ -148,7 +163,8 @@ static int caps_word_keycode_state_changed_listener(const zmk_event_t *eh) {
         if (!caps_word_is_alpha(ev->keycode) && !caps_word_is_numeric(ev->keycode) &&
             !is_mod(ev->usage_page, ev->keycode) &&
             !caps_word_is_caps_includelist(config, ev->usage_page, ev->keycode,
-                                           ev->implicit_modifiers)) {
+                                           ev->implicit_modifiers) &&
+            !caps_word_is_aux_keycode(config, ev)) {
             LOG_DBG("Deactivating caps_word for 0x%02X - 0x%02X", ev->usage_page, ev->keycode);
             deactivate_caps_word(dev);
         }
@@ -174,11 +190,14 @@ static int behavior_caps_word_init(const struct device *dev) {
 
 #define KP_INST(n)                                                                                 \
     static struct behavior_caps_word_data behavior_caps_word_data_##n = {.active = false};         \
+    static int32_t* mods_trigger_aux_keycodes_##n = DT_INST_PROP(n, mods_trigger_aux_keycodes);             \
     static struct behavior_caps_word_config behavior_caps_word_config_##n = {                      \
         .index = n,                                                                                \
         .mods = DT_INST_PROP_OR(n, mods, MOD_LSFT),                                                \
-        .continuations = {UTIL_LISTIFY(DT_INST_PROP_LEN(n, continue_list), BREAK_ITEM, n)},        \
+        .mods_trigger_aux_keycodes_len = DT_INST_PROP_LEN(n, mods_trigger_aux_keycodes),           \
+        .mods_trigger_aux_keycodes = &mods_trigger_aux_keycodes_##n,                                   \
         .continuations_count = DT_INST_PROP_LEN(n, continue_list),                                 \
+        .continuations = {UTIL_LISTIFY(DT_INST_PROP_LEN(n, continue_list), BREAK_ITEM, n)},        \
     };                                                                                             \
     DEVICE_DT_INST_DEFINE(n, behavior_caps_word_init, NULL, &behavior_caps_word_data_##n,          \
                           &behavior_caps_word_config_##n, APPLICATION,                             \

@@ -13,3 +13,7 @@ properties:
     required: true
   mods:
     type: int
+  mods-trigger-aux-keycodes:
+    type: array
+    required: false
+    default: []
